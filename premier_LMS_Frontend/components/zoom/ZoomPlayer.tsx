@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import Cookies from 'js-cookie';
 import { io } from 'socket.io-client';
 
@@ -48,12 +48,41 @@ function ZoomPlayer({
   const mountedRef = useRef(true);
   const isInitializingRef = useRef(false);
   const isConnectedRef = useRef(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isCurrentlyAwayRef = useRef(false);
+  
   const [status, setStatus] = useState<ZoomStatus>('loading');
   const [errorMessage, setErrorMessage] = useState('');
-  const [watermarkPos, setWatermarkPos] = useState({ x: 20, y: 30 });
+  const [userIp, setUserIp] = useState<string>('Loading IP...');
+  const [watermarkPos, setWatermarkPos] = useState({ x: 20, y: 30, opacity: 0.15 });
   const [isRecordingActive, setIsRecordingActive] = useState(false);
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
+  const [strikes, setStrikes] = useState(0);
+  const [showWarningModal, setShowWarningModal] = useState(false);
 
-  // Style Injection & Cleanup effect
+  // 1. Fetch Student's Public IP on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchIp() {
+      try {
+        const res = await fetch('https://api.ipify.org?format=json');
+        const data = await res.json();
+        if (isMounted) {
+          setUserIp(data.ip || 'Unknown IP');
+        }
+      } catch (err) {
+        if (isMounted) {
+          setUserIp('IP Unavailable');
+        }
+      }
+    }
+    fetchIp();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 2. Style Injection & Cleanup effect
   useEffect(() => {
     // Inject styles for Client View root
     const styleEl = document.createElement('style');
@@ -90,31 +119,149 @@ function ZoomPlayer({
     };
   }, []);
 
-  // Block right-clicks and Picture-in-Picture on component mount
+  // 3. Block Developer Tools, Keyboard Shortcuts, and Right-clicks
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
     };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMetaOrCtrl = e.ctrlKey || e.metaKey;
+      const isShift = e.shiftKey;
+      const isAlt = e.altKey;
+
+      // F12 key
+      if (e.key === 'F12') {
+        e.preventDefault();
+        alert('Developer tools are disabled to protect copyright content.');
+        return;
+      }
+
+      // Check standard inspection combinations: Ctrl+Shift+I / J / C, Ctrl+U
+      // Mac counterparts use Cmd+Option+I / J / C, Cmd+Option+U
+      const isDevToolsCombination =
+        (isMetaOrCtrl && isShift && (e.key === 'i' || e.key === 'I' || e.key === 'j' || e.key === 'J' || e.key === 'c' || e.key === 'C')) ||
+        (isMetaOrCtrl && (e.key === 'u' || e.key === 'U')) ||
+        (isMetaOrCtrl && isAlt && (e.key === 'i' || e.key === 'I' || e.key === 'j' || e.key === 'J' || e.key === 'c' || e.key === 'C' || e.key === 'u' || e.key === 'U'));
+
+      if (isDevToolsCombination) {
+        e.preventDefault();
+        alert('Developer tools and view-source shortcuts are disabled to protect copyright content.');
+      }
+    };
+
     document.addEventListener('contextmenu', handleContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
 
-  // Update watermark coordinates randomly every 8 seconds
+  // 4. Focus/Blur and Visibility Tracking (Tab Switch Penalty System)
+  useEffect(() => {
+    if (isModerator || status !== 'connected') return;
+
+    const handleUserAway = () => {
+      if (!isCurrentlyAwayRef.current) {
+        isCurrentlyAwayRef.current = true;
+        setStrikes((prev) => {
+          const nextStrikes = prev + 1;
+          if (nextStrikes >= 5) {
+            // Instant termination on Strike 5
+            try {
+              import('@zoom/meetingsdk').then(({ ZoomMtg }) => {
+                try {
+                  ZoomMtg.leaveMeeting({});
+                } catch (e) {
+                  console.error('Error leaving Zoom meeting:', e);
+                }
+              });
+            } catch (err) {
+              console.error(err);
+            }
+            window.location.href = '/penalty';
+          }
+          return nextStrikes;
+        });
+      }
+    };
+
+    const handleUserReturn = () => {
+      isCurrentlyAwayRef.current = false;
+      setStrikes((currentStrikes) => {
+        if (currentStrikes > 0 && currentStrikes < 5) {
+          setShowWarningModal(true);
+        }
+        return currentStrikes;
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleUserAway();
+      } else {
+        handleUserReturn();
+      }
+    };
+
+    const handleBlur = () => {
+      handleUserAway();
+      setIsWindowFocused(false);
+    };
+
+    const handleFocus = () => {
+      handleUserReturn();
+      setIsWindowFocused(true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isModerator, status]);
+
+  // Keep simple Focus/Blur for Moderators (without strike systems)
+  useEffect(() => {
+    if (!isModerator || status !== 'connected') return;
+
+    const handleBlur = () => setIsWindowFocused(false);
+    const handleFocus = () => setIsWindowFocused(true);
+
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isModerator, status]);
+
+  const handleAcknowledgeWarning = () => {
+    setShowWarningModal(false);
+  };
+
+  // 5. Update watermark coordinates and opacity randomly every 6 seconds
   useEffect(() => {
     if (status !== 'connected') return;
 
     const interval = setInterval(() => {
-      const x = Math.floor(Math.random() * 70) + 10; // 10% to 80%
-      const y = Math.floor(Math.random() * 70) + 10;
-      setWatermarkPos({ x, y });
-    }, 8000);
+      const x = Math.floor(Math.random() * 60) + 20; // 20% to 80%
+      const y = Math.floor(Math.random() * 60) + 20;
+      const opacity = parseFloat((Math.random() * 0.14 + 0.08).toFixed(3)); // Opacity between 0.08 and 0.22
+      setWatermarkPos({ x, y, opacity });
+    }, 6000);
 
     return () => clearInterval(interval);
   }, [status]);
 
-  // Connect WebSockets for real-time permissions & recording states sync
+  // 6. Connect WebSockets for real-time permissions & recording states sync
   useEffect(() => {
     if (status !== 'connected') return;
 
@@ -134,8 +281,6 @@ function ZoomPlayer({
 
     const handlePermissionUpdate = (data: any) => {
       if (data.userId === 'all' || data.userId === userId) {
-        // Microphone and Camera control in Client View is not programmatically accessible in the same way,
-        // but we keep the warnings and socket structure for compatibility.
         if (data.allowMic === false) {
           console.warn('[ZoomPlayer] Locked mic by host.');
         }
@@ -183,7 +328,76 @@ function ZoomPlayer({
     onError?.(msg);
   };
 
-  // Main client view initialization effect
+  // 7. Draw dynamic Canvas watermark
+  const drawWatermark = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Clear previous drawings
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (status !== 'connected') return;
+
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${watermarkPos.opacity})`;
+    ctx.font = 'bold 12px monospace';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 3;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+
+    const lines = [
+      userName,
+      userEmail || 'Student',
+      `ID: ${userId || 'N/A'}`,
+      `IP: ${userIp}`,
+      `Session: ${meetingNumber}`,
+      `Time: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    ];
+
+    // Compute pixel coordinates from random percentages
+    const pxX = (watermarkPos.x / 100) * canvas.width;
+    const pxY = (watermarkPos.y / 100) * canvas.height;
+
+    let currentY = pxY;
+    lines.forEach((line) => {
+      const textWidth = ctx.measureText(line).width;
+      ctx.fillText(line, pxX - textWidth / 2, currentY);
+      currentY += 16;
+    });
+
+    ctx.restore();
+  }, [status, watermarkPos, userName, userEmail, userId, userIp, meetingNumber]);
+
+  // 8. Watch for window resize and orientation changes
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      drawWatermark();
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+    };
+  }, [drawWatermark]);
+
+  // 9. Re-draw watermark when canvas element mounts or inputs update
+  useEffect(() => {
+    if (status === 'connected') {
+      drawWatermark();
+    }
+  }, [status, drawWatermark]);
+
+  // 10. Main client view initialization effect
   useEffect(() => {
     if (isInitializingRef.current || isConnectedRef.current) return;
     isInitializingRef.current = true;
@@ -274,29 +488,59 @@ function ZoomPlayer({
         </div>
       )}
 
-      {/* Screenshot protection watermark */}
+      {/* Screenshot protection forensic Canvas watermark */}
       {status === 'connected' && (
-        <div
+        <canvas
+          ref={canvasRef}
           style={{
             position: 'fixed',
-            left: `${watermarkPos.x}%`,
-            top: `${watermarkPos.y}%`,
-            transform: 'translate(-50%, -50%)',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
             zIndex: 10000,
-            opacity: 0.18,
-            color: '#ffffff',
-            fontSize: '11px',
-            fontWeight: 'bold',
-            fontFamily: 'monospace',
-            whiteSpace: 'nowrap',
-            textShadow: '1px 1px 2px #000000',
+            pointerEvents: 'none',
           }}
-          className="transition-all duration-1000 ease-in-out pointer-events-none select-none flex flex-col items-center"
-        >
-          <span>{userName}</span>
-          <span>{userEmail || 'Student'}</span>
-          <span>Session: {meetingNumber}</span>
-          <span>{new Date().toLocaleDateString()}</span>
+        />
+      )}
+
+      {/* Focus Loss Obfuscation Screen (z-index 10001 covers both canvas and Zoom view) */}
+      {status === 'connected' && !isWindowFocused && !showWarningModal && (
+        <div className="fixed inset-0 bg-black z-[10001] flex flex-col items-center justify-center text-center p-6 gap-4 text-white select-none pointer-events-auto">
+          <div className="w-12 h-12 rounded-full bg-yellow-950/70 flex items-center justify-center text-yellow-500 font-bold text-xl border border-yellow-500/30 animate-pulse">
+            ⚠️
+          </div>
+          <div className="space-y-1.5 max-w-md">
+            <h3 className="font-bold text-lg text-yellow-400">
+              Live Stream Hidden
+            </h3>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Please click back into this window to resume the live class.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Strike Warning Modal (z-index 10002 to be above the focus loss screen) */}
+      {status === 'connected' && showWarningModal && strikes > 0 && strikes < 5 && (
+        <div className="fixed inset-0 bg-black/95 z-[10002] flex flex-col items-center justify-center text-center p-6 gap-6 text-white select-none">
+          <div className="w-16 h-16 rounded-full bg-red-950/70 flex items-center justify-center text-red-500 font-bold text-2xl border border-red-500/30 animate-bounce">
+            ⚠️
+          </div>
+          <div className="space-y-2 max-w-md">
+            <h3 className="font-extrabold text-xl text-red-500 uppercase tracking-wide">
+              Violation Warning ({strikes}/5)
+            </h3>
+            <p className="text-sm text-gray-300 leading-relaxed">
+              Leaving the classroom tab or window is strictly prohibited. Further violations will result in automatic removal from the class.
+            </p>
+          </div>
+          <button
+            onClick={handleAcknowledgeWarning}
+            className="px-6 py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-bold rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-600/30 hover:scale-[1.02]"
+          >
+            I Understand & Return to Class
+          </button>
         </div>
       )}
 
