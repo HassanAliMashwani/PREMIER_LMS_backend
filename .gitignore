@@ -1,0 +1,29 @@
+# Dependencies
+**/node_modules/
+
+# Next.js build output
+**/.next/
+**/out/
+
+# NestJS build output
+**/dist/
+
+# Env files
+**/.env*
+
+# Logs
+**/*.log
+**/logs/
+
+# Uploads
+**/uploads/
+
+# IDE files
+**/.vscode/
+**/.idea/
+**/*.swp
+**/*.swo
+
+# OS files
+**/.DS_Store
+**/Thumbs.db

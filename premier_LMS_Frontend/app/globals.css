@@ -1,0 +1,267 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans text-text-primary antialiased bg-white;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold text-text-primary leading-tight;
+  }
+
+  ::selection {
+    @apply bg-brand-green/10 text-text-primary;
+  }
+}
+
+@layer components {
+  .container-main {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .btn-signup {
+    @apply bg-accent-gold text-forest font-semibold px-5 py-2 rounded-md text-sm
+           hover:bg-accent-gold-dark transition-all duration-200
+           focus-visible:outline-2 focus-visible:outline-accent-gold focus-visible:outline-offset-2;
+  }
+
+  .btn-signin {
+    @apply bg-white text-brand-green font-semibold px-5 py-2 rounded-md text-sm
+           border border-brand-green
+           hover:bg-brand-green/5 transition-all duration-200
+           focus-visible:outline-2 focus-visible:outline-brand-green focus-visible:outline-offset-2;
+  }
+
+  .card-course {
+    @apply bg-white border border-border-light rounded-xl overflow-hidden
+           transition-all duration-300 ease-out
+           hover:shadow-card-hover hover:-translate-y-1;
+  }
+
+  .card-live {
+    @apply relative rounded-xl overflow-hidden cursor-pointer
+           transition-all duration-300 ease-out
+           hover:shadow-card-hover hover:-translate-y-1;
+  }
+
+  .card-batch {
+    @apply bg-white border border-border-light rounded-xl overflow-hidden
+           transition-all duration-300 ease-out
+           hover:shadow-card-hover hover:-translate-y-1;
+  }
+
+  .section-title {
+    @apply text-xl md:text-2xl font-bold text-text-primary;
+  }
+
+  .count-badge {
+    @apply inline-flex items-center justify-center bg-gray-100 text-text-secondary
+           text-xs font-medium px-2.5 py-0.5 rounded-full ml-2;
+  }
+
+  .discount-pill {
+    @apply inline-flex items-center bg-amber-100 text-amber-800
+           text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+
+  .live-badge {
+    @apply inline-flex items-center bg-live-blue text-white
+           text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded;
+  }
+}
+
+/* Hide scrollbar for carousels */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Focus & interaction */
+button, a, [role="button"], input, select, textarea {
+  @apply outline-none;
+}
+
+button:focus-visible, a:focus-visible {
+  @apply outline-2 outline-brand-green outline-offset-2;
+}
+
+/* Custom scrollbar for non-carousel areas */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+
+/* ─── Enhanced Hover Effects ──────────────────────────────── */
+
+/* Floating hover — gentle up-down float on hover */
+.hover-float {
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease;
+}
+.hover-float:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* Glow border — accent-gold glow on hover */
+.hover-glow {
+  transition: box-shadow 0.4s ease, border-color 0.4s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.hover-glow:hover {
+  box-shadow: 0 0 0 3px rgba(201, 168, 76, 0.15), 0 10px 30px rgba(0, 0, 0, 0.08);
+  border-color: rgba(201, 168, 76, 0.5);
+  transform: translateY(-4px);
+}
+
+/* Shine sweep — diagonal light sweep */
+.hover-shine {
+  position: relative;
+  overflow: hidden;
+}
+.hover-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(255, 255, 255, 0) 70%,
+    transparent 100%
+  );
+  transition: left 0.6s ease;
+  pointer-events: none;
+}
+.hover-shine:hover::after {
+  left: 130%;
+}
+
+/* Tilt perspective — 3D tilt on hover */
+.hover-tilt {
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+  transform-style: preserve-3d;
+  perspective: 800px;
+}
+.hover-tilt:hover {
+  transform: perspective(800px) rotateX(2deg) rotateY(-2deg) translateY(-4px);
+  box-shadow: 8px 12px 30px rgba(0, 0, 0, 0.12);
+}
+
+/* Underline reveal — animated underline on text */
+.hover-underline-reveal {
+  position: relative;
+  display: inline-block;
+}
+.hover-underline-reveal::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0%;
+  height: 2px;
+  background: linear-gradient(90deg, #1a4a3a, #c9a84c);
+  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border-radius: 2px;
+}
+.hover-underline-reveal:hover::after {
+  width: 100%;
+}
+
+/* Icon bounce — bouncy scale on parent hover */
+.group:hover .hover-icon-bounce {
+  animation: iconBounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes iconBounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.3); }
+  60% { transform: scale(0.95); }
+  80% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+/* Pulsing gold ring — for portrait frames */
+.animate-gold-ring {
+  animation: goldRing 3s ease-in-out infinite;
+}
+
+@keyframes goldRing {
+  0%, 100% { border-color: rgba(201, 168, 76, 0.25); box-shadow: 0 0 0 0 rgba(201, 168, 76, 0); }
+  50% { border-color: rgba(201, 168, 76, 0.6); box-shadow: 0 0 20px 4px rgba(201, 168, 76, 0.15); }
+}
+
+/* Stat counter hover */
+.hover-stat {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.hover-stat:hover {
+  transform: scale(1.08);
+}
+.hover-stat:hover .stat-value {
+  text-shadow: 0 0 20px rgba(201, 168, 76, 0.4);
+}
+
+/* Quote bar glow */
+.hover-quote {
+  transition: border-color 0.4s ease, padding-left 0.4s ease;
+}
+.hover-quote:hover {
+  border-color: #c9a84c;
+  padding-left: 1.25rem;
+}
+
+/* CTA shimmer */
+.cta-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.cta-shimmer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+  animation: ctaShimmer 4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes ctaShimmer {
+  0% { left: -100%; }
+  50% { left: 100%; }
+  100% { left: 100%; }
+}
+
+/* Custom Modal Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+.animate-scale-up {
+  animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
