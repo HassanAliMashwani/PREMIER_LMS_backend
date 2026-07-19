@@ -14,6 +14,12 @@ export interface ZoomPlayerProps {
   userEmail?: string;
   userId?: string;
   isModerator: boolean;
+  /**
+   * Zoom Access Token (ZAK) — required for the host to claim host privileges
+   * inside the meeting (Admit buttons, waiting-room management, mute-all).
+   * Only pass this for moderators. Fetched fresh from the backend on each join.
+   */
+  zak?: string;
   /** Shared socket from parent to reuse */
   socket?: any;
   /** Called when client is successfully initialized and joined */
@@ -40,6 +46,7 @@ function ZoomPlayer({
   userEmail,
   userId,
   isModerator,
+  zak,
   socket,
   onInit,
   onMeetingEnd,
@@ -49,16 +56,12 @@ function ZoomPlayer({
   const isInitializingRef = useRef(false);
   const isConnectedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isCurrentlyAwayRef = useRef(false);
-  
+
   const [status, setStatus] = useState<ZoomStatus>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [userIp, setUserIp] = useState<string>('Loading IP...');
   const [watermarkPos, setWatermarkPos] = useState({ x: 20, y: 30, opacity: 0.15 });
   const [isRecordingActive, setIsRecordingActive] = useState(false);
-  const [isWindowFocused, setIsWindowFocused] = useState(true);
-  const [strikes, setStrikes] = useState(0);
-  const [showWarningModal, setShowWarningModal] = useState(false);
 
   // 1. Fetch Student's Public IP on mount
   useEffect(() => {
@@ -159,95 +162,7 @@ function ZoomPlayer({
     };
   }, []);
 
-  // 4. Focus/Blur and Visibility Tracking (Tab Switch Penalty System)
-  useEffect(() => {
-    if (isModerator || status !== 'connected') return;
-
-    const handleUserAway = () => {
-      if (!isCurrentlyAwayRef.current) {
-        isCurrentlyAwayRef.current = true;
-        setStrikes((prev) => {
-          const nextStrikes = prev + 1;
-          if (nextStrikes >= 5) {
-            // Instant termination on Strike 5
-            try {
-              import('@zoom/meetingsdk').then(({ ZoomMtg }) => {
-                try {
-                  ZoomMtg.leaveMeeting({});
-                } catch (e) {
-                  console.error('Error leaving Zoom meeting:', e);
-                }
-              });
-            } catch (err) {
-              console.error(err);
-            }
-            window.location.href = '/penalty';
-          }
-          return nextStrikes;
-        });
-      }
-    };
-
-    const handleUserReturn = () => {
-      isCurrentlyAwayRef.current = false;
-      setStrikes((currentStrikes) => {
-        if (currentStrikes > 0 && currentStrikes < 5) {
-          setShowWarningModal(true);
-        }
-        return currentStrikes;
-      });
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        handleUserAway();
-      } else {
-        handleUserReturn();
-      }
-    };
-
-    const handleBlur = () => {
-      handleUserAway();
-      setIsWindowFocused(false);
-    };
-
-    const handleFocus = () => {
-      handleUserReturn();
-      setIsWindowFocused(true);
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [isModerator, status]);
-
-  // Keep simple Focus/Blur for Moderators (without strike systems)
-  useEffect(() => {
-    if (!isModerator || status !== 'connected') return;
-
-    const handleBlur = () => setIsWindowFocused(false);
-    const handleFocus = () => setIsWindowFocused(true);
-
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [isModerator, status]);
-
-  const handleAcknowledgeWarning = () => {
-    setShowWarningModal(false);
-  };
-
-  // 5. Update watermark coordinates and opacity randomly every 6 seconds
+  // 4. Update watermark coordinates and opacity randomly every 6 seconds
   useEffect(() => {
     if (status !== 'connected') return;
 
@@ -418,18 +333,101 @@ function ZoomPlayer({
           leaveUrl: isModerator
             ? `${window.location.origin}/admin/classes`
             : `${window.location.origin}/dashboard`,
+
+          // ── Screen sharing: host-only ────────────────────────────────────────
+          // screenShare: 1 shows the share button; 0 hides it entirely for
+          // non-host participants, preventing students from attempting to share.
+          screenShare: isModerator ? 1 : 0,
+
+          // Ensure the full participant management panel renders for the host.
+          // Without isSupportAV the SDK may suppress host-only controls
+          // such as the waiting-room admit panel and per-user mute buttons.
+          isSupportAV: true,
+
+          // Collapse the audio panel by default — reduces student UI noise.
+          audioPanelAlwaysOpen: false,
+
           success: () => {
-            ZoomMtg.join({
+            // ── Build join parameters ──────────────────────────────────────────
+            // The zak (Zoom Access Token) is passed only for the host/moderator.
+            // It is what causes Zoom's backend to actually grant host privileges
+            // inside the meeting — without it, role:1 in the JWT only elevates
+            // the SDK UI, but the Participants panel Admit buttons stay hidden.
+            const joinParams: Record<string, any> = {
               meetingNumber: meetingNumber,
-              userName: userName,
-              signature: signature,
-              sdkKey: sdkKey,
-              userEmail: userEmail || '',
-              passWord: password,
+              userName:      userName,
+              signature:     signature,
+              sdkKey:        sdkKey,
+              userEmail:     userEmail || '',
+              passWord:      password,
+            };
+
+            if (isModerator && zak) {
+              // ZAK grants actual host role — enables Admit, waiting-room
+              // management, mute-all, and all other host controls.
+              joinParams.zak = zak;
+            }
+
+            ZoomMtg.join({
+              ...joinParams,
               success: () => {
                 setStatus('connected');
                 isConnectedRef.current = true;
                 onInit?.(null);
+
+                // ── Host-only: waiting-room & participant join listeners ──────
+                // These give the host console visibility into who is entering
+                // (or stuck in) the Zoom waiting room, as a diagnostic tool.
+                // onWaitingRoomParticipantJoin fires when Zoom's native waiting
+                // room is active and a participant is held there.
+                if (isModerator) {
+                  ZoomMtg.inMeetingServiceListener(
+                    'onWaitingRoomParticipantJoin',
+                    (data: any) => {
+                      console.info(
+                        `[ZoomPlayer] 🚪 Participant entered Zoom waiting room:`,
+                        data?.userId,
+                        data?.displayName,
+                      );
+                    },
+                  );
+
+                  ZoomMtg.inMeetingServiceListener(
+                    'onUserJoin',
+                    (data: any) => {
+                      console.info(
+                        `[ZoomPlayer] ✅ Participant joined the meeting:`,
+                        data?.userId,
+                        data?.displayName,
+                      );
+                    },
+                  );
+                }
+
+                // ── Hard-mute guard (client-side enforcement layer) ──────────
+                // The authoritative control is the Zoom meeting setting
+                // `allow_participants_to_unmute: false` set via the REST API
+                // (POST /v2/meetings → settings.allow_participants_to_unmute).
+                //
+                // This listener is a defense-in-depth layer: if a student
+                // somehow unmutes themselves, we immediately re-mute them.
+                // Fires within ~200 ms. Does NOT run for the host/moderator.
+                if (!isModerator) {
+                  ZoomMtg.inMeetingServiceListener(
+                    'onAudioStateChange',
+                    (data: any) => {
+                      if (data?.muted === false) {
+                        // Student unmuted — re-mute immediately
+                        ZoomMtg.muteAudio({
+                          mute: true,
+                          success: () => {},
+                          error: (e: any) =>
+                            console.error('[ZoomPlayer] Re-mute failed:', e),
+                        });
+                      }
+                    }
+                  );
+                }
               },
               error: (err: any) => {
                 console.error('[Zoom] Join error:', err);
@@ -502,46 +500,6 @@ function ZoomPlayer({
             pointerEvents: 'none',
           }}
         />
-      )}
-
-      {/* Focus Loss Obfuscation Screen (z-index 10001 covers both canvas and Zoom view) */}
-      {status === 'connected' && !isWindowFocused && !showWarningModal && (
-        <div className="fixed inset-0 bg-black z-[10001] flex flex-col items-center justify-center text-center p-6 gap-4 text-white select-none pointer-events-auto">
-          <div className="w-12 h-12 rounded-full bg-yellow-950/70 flex items-center justify-center text-yellow-500 font-bold text-xl border border-yellow-500/30 animate-pulse">
-            ⚠️
-          </div>
-          <div className="space-y-1.5 max-w-md">
-            <h3 className="font-bold text-lg text-yellow-400">
-              Live Stream Hidden
-            </h3>
-            <p className="text-sm text-gray-400 leading-relaxed">
-              Please click back into this window to resume the live class.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Strike Warning Modal (z-index 10002 to be above the focus loss screen) */}
-      {status === 'connected' && showWarningModal && strikes > 0 && strikes < 5 && (
-        <div className="fixed inset-0 bg-black/95 z-[10002] flex flex-col items-center justify-center text-center p-6 gap-6 text-white select-none">
-          <div className="w-16 h-16 rounded-full bg-red-950/70 flex items-center justify-center text-red-500 font-bold text-2xl border border-red-500/30 animate-bounce">
-            ⚠️
-          </div>
-          <div className="space-y-2 max-w-md">
-            <h3 className="font-extrabold text-xl text-red-500 uppercase tracking-wide">
-              Violation Warning ({strikes}/5)
-            </h3>
-            <p className="text-sm text-gray-300 leading-relaxed">
-              Leaving the classroom tab or window is strictly prohibited. Further violations will result in automatic removal from the class.
-            </p>
-          </div>
-          <button
-            onClick={handleAcknowledgeWarning}
-            className="px-6 py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-sm font-bold rounded-xl transition-all duration-200 cursor-pointer shadow-lg shadow-red-600/30 hover:scale-[1.02]"
-          >
-            I Understand & Return to Class
-          </button>
-        </div>
       )}
 
       {/* Recording Indicator */}

@@ -172,10 +172,81 @@ export class ZoomService {
   }
 
   /**
+   * Fetches a short-lived ZAK (Zoom Access Token) for the given Zoom user.
+   *
+   * The ZAK is REQUIRED by the Zoom Web Meeting SDK so that a joining participant
+   * can *claim* the host role inside the meeting. A role:1 JWT signature alone
+   * elevates the SDK UI but does NOT grant actual host privileges — the host
+   * will not see Participants panel "Admit" buttons, cannot manage the waiting
+   * room, and cannot mute/unmute others until the ZAK is presented.
+   *
+   * ZAK tokens are user-scoped and short-lived (~90 minutes).
+   * DO NOT cache them — fetch fresh on every host join request.
+   *
+   * Zoom REST API: GET /v2/users/{userId}/token?type=zak
+   * Requires scope: user:read:admin or user_zak:read:admin
+   */
+  async getZakToken(userEmail?: string): Promise<string | null> {
+    const token = await this.getAccessToken();
+    if (!token) {
+      this.logger.warn('❌ Cannot fetch ZAK: S2S OAuth access token is unavailable.');
+      return null;
+    }
+
+    const email = userEmail || this.teacherEmail;
+    if (!email) {
+      this.logger.error(
+        '❌ Cannot fetch ZAK: no userEmail provided and ZOOM_TEACHER_EMAIL is not set in .env. ' +
+        'The host will join without host privileges (Admit buttons will be missing).',
+      );
+      return null;
+    }
+
+    try {
+      const response = await fetch(
+        `https://api.zoom.us/v2/users/${encodeURIComponent(email)}/token?type=zak`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(
+          `❌ ZAK token request failed (HTTP ${response.status}): ${errorText}\n` +
+          `   Common causes:\n` +
+          `   • Missing scope 'user:read:admin' or 'user_zak:read:admin' on the S2S OAuth app\n` +
+          `   • Email '${email}' does not exist in your Zoom account`,
+        );
+        return null;
+      }
+
+      const data = await response.json();
+      const zak: string | undefined = data.token;
+
+      if (!zak) {
+        this.logger.error(`❌ Zoom API returned an empty ZAK for ${email}. Check app scopes.`);
+        return null;
+      }
+
+      this.logger.log(`✅ ZAK token fetched for host: ${email}`);
+      return zak;
+    } catch (error: any) {
+      this.logger.error(`❌ Error fetching ZAK token for ${email}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Creates a Zoom Meeting automatically using Zoom API.
    * Uses the teacher email from ZOOM_TEACHER_EMAIL env var as the meeting host.
    */
   async createZoomMeeting(params: {
+
     topic: string;
     startTime: Date;
     durationMinutes: number;
@@ -216,10 +287,19 @@ export class ZoomService {
             settings: {
               host_video: true,
               participant_video: false,
+              // ── Hard Mute (Layer 1 — server-side enforcement) ──────────────
+              // mute_upon_entry mutes everyone on join.
+              // allow_participants_to_unmute: false means ONLY the host can
+              // unmute a participant. Students cannot unmute themselves.
+              // This is enforced by Zoom's backend and reflected in the SDK UI
+              // (mic button is greyed out / disabled for non-hosts).
               mute_upon_entry: true,
-              waiting_room: false,
-              join_before_host: true,
+              allow_participants_to_unmute: false,
+              // ── Screen sharing: host only ───────────────────────────────────
               participant_sharing: 'host',
+              // ── Lobby: rely on Zoom's native waiting-room system ───────────
+              waiting_room: true,
+              join_before_host: true,
             },
           }),
         },
@@ -244,11 +324,20 @@ export class ZoomService {
         if (verifyResponse.ok) {
           const verifyData = await verifyResponse.json();
           const actualSettings = verifyData.settings || {};
-          if (actualSettings.waiting_room !== false) {
-            this.logger.warn(`⚠️ ZOOM ACCOUNT SETTINGS OVERRIDE: We requested waiting_room=false, but Zoom forced it to ${actualSettings.waiting_room}. Please unlock this setting in your Zoom.us web dashboard.`);
+          if (actualSettings.allow_participants_to_unmute !== false) {
+            this.logger.warn(
+              `⚠️ ZOOM ACCOUNT SETTINGS OVERRIDE: We requested allow_participants_to_unmute=false ` +
+              `(hard mute), but Zoom applied: ${actualSettings.allow_participants_to_unmute}. ` +
+              `Students can still unmute themselves! ` +
+              `Fix: Zoom Dashboard → Account Settings → In Meeting (Basic) → ` +
+              `"Allow participants to unmute themselves" → Lock OFF.`
+            );
+          }
+          if (actualSettings.waiting_room !== true) {
+            this.logger.warn(`⚠️ ZOOM ACCOUNT SETTINGS OVERRIDE: We requested waiting_room=true, but Zoom applied: ${actualSettings.waiting_room}. Please enable the waiting room setting in your Zoom.us web dashboard.`);
           }
           if (actualSettings.join_before_host !== true) {
-            this.logger.warn(`⚠️ ZOOM ACCOUNT SETTINGS OVERRIDE: We requested join_before_host=true, but Zoom forced it to ${actualSettings.join_before_host}. Please unlock this setting in your Zoom.us web dashboard.`);
+            this.logger.warn(`⚠️ ZOOM ACCOUNT SETTINGS OVERRIDE: We requested join_before_host=true, but Zoom applied: ${actualSettings.join_before_host}. Please unlock this setting in your Zoom.us web dashboard.`);
           }
         }
       } catch (verifyErr: any) {

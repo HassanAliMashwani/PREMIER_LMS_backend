@@ -259,6 +259,20 @@ export class ClassService {
       role: isModerator ? 1 : 0,
     });
 
+    // ── ZAK token: required for the host to claim host privileges in the SDK ──
+    // Without a ZAK, the host joins with an elevated JWT (role:1) but Zoom's
+    // backend does not grant actual host controls — Participants panel "Admit"
+    // buttons, waiting-room management, and mute-all are all hidden.
+    // We fetch a fresh ZAK on every host join (they expire in ~90 min, never cache).
+    let zak: string | null = null;
+    if (isModerator) {
+      zak = await this.zoomService.getZakToken();
+      if (!zak) {
+        // Non-fatal: host can still join but will lack full host controls.
+        // The error is already logged inside getZakToken() with fix instructions.
+      }
+    }
+
     return {
       zoomMeetingId: zoomMeetingNumber,
       zoomPasscode: cls.zoomPasscode,
@@ -270,8 +284,11 @@ export class ClassService {
       allowStudentMic: cls.allowStudentMic,
       allowStudentCamera: cls.allowStudentCamera,
       allowStudentScreenshare: cls.allowStudentScreenshare,
+      // Included only for moderators; undefined for students (not serialised).
+      ...(zak ? { zak } : {}),
     };
   }
+
 
   async forceEndZoom(id: string) {
     const cls = await this.findById(id);

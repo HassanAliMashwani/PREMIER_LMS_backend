@@ -21,6 +21,12 @@ interface ZoomCredentials {
   allowStudentMic: boolean;
   allowStudentCamera: boolean;
   allowStudentScreenshare: boolean;
+  /**
+   * Zoom Access Token — returned by the backend only for moderators.
+   * Passed to ZoomMtg.join() so the host claims full host privileges
+   * (Admit buttons, waiting-room management, mute-all controls).
+   */
+  zak?: string;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -398,44 +404,7 @@ export default function ClassroomPage() {
         </div>
       )}
 
-      {/* Student Waiting Room Overlay */}
-      {isWaiting && !error && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-gray-950 via-[#0a1c14] to-black text-white p-6">
-          <div className="relative flex flex-col items-center space-y-6 max-w-md text-center">
-            {/* Pulsing secure lock */}
-            <div className="w-16 h-16 rounded-full bg-emerald-950/50 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.15)] animate-pulse">
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
 
-            <div className="space-y-2">
-              <h2 className="text-xl font-extrabold tracking-tight">Waiting for Host Approval</h2>
-              <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                The live class instructor will admit you shortly. Please wait in this secure lobby.
-              </p>
-            </div>
-
-            <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-2.5">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-gray-500">Attendee:</span>
-                <span className="font-semibold text-gray-200">{user?.name}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-gray-500">Email:</span>
-                <span className="font-semibold text-gray-200">{user?.email}</span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="px-5 py-2.5 bg-neutral-900 border border-white/10 hover:bg-neutral-800 text-white font-bold rounded-xl text-xs transition-all duration-200 cursor-pointer shadow-lg"
-            >
-              Cancel & Leave
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Host Control Panel Sidebar Drawer */}
       {credentials && credentials.isModerator && showControlPanel && (
@@ -604,19 +573,8 @@ export default function ClassroomPage() {
         </div>
       )}
 
-      {/* Waiting Room Overlay for Students */}
-      {isWaiting && !error && credentials && !credentials.isModerator && (
-        <div className="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-[#0a0a0a] text-white">
-          <div className="w-12 h-12 border-4 border-brand-green/30 border-t-brand-green rounded-full animate-spin mb-6" />
-          <h2 className="text-xl font-bold mb-2 text-center">Waiting for the instructor to admit you</h2>
-          <p className="text-sm text-gray-400 text-center max-w-md px-6">
-            You are currently in the waiting room. The live class will begin as soon as the host admits you.
-          </p>
-        </div>
-      )}
-
-      {/* Zoom Component View — rendered once credentials are available and not waiting */}
-      {!loading && !error && credentials && !isWaiting && (
+      {/* Zoom Component View — rendered once credentials are available */}
+      {!loading && !error && credentials && (
         <ZoomPlayer
           sdkKey={credentials.sdkKey}
           signature={credentials.signature}
@@ -630,6 +588,7 @@ export default function ClassroomPage() {
           userEmail={user?.email || ''}
           userId={user?.id}
           isModerator={credentials.isModerator}
+          zak={credentials.zak}
           socket={socket}
           onInit={(client) => {
             setZoomClient(client);
