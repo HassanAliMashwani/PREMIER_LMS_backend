@@ -337,7 +337,7 @@ function ZoomPlayer({
           // ── Screen sharing: host-only ────────────────────────────────────────
           // screenShare: 1 shows the share button; 0 hides it entirely for
           // non-host participants, preventing students from attempting to share.
-          screenShare: isModerator ? 1 : 0,
+          screenShare: isModerator ? true : false,
 
           // Ensure the full participant management panel renders for the host.
           // Without isSupportAV the SDK may suppress host-only controls
@@ -353,23 +353,17 @@ function ZoomPlayer({
             // It is what causes Zoom's backend to actually grant host privileges
             // inside the meeting — without it, role:1 in the JWT only elevates
             // the SDK UI, but the Participants panel Admit buttons stay hidden.
-            const joinParams: Record<string, any> = {
+            ZoomMtg.join({
               meetingNumber: meetingNumber,
               userName:      userName,
               signature:     signature,
               sdkKey:        sdkKey,
               userEmail:     userEmail || '',
               passWord:      password,
-            };
-
-            if (isModerator && zak) {
               // ZAK grants actual host role — enables Admit, waiting-room
               // management, mute-all, and all other host controls.
-              joinParams.zak = zak;
-            }
-
-            ZoomMtg.join({
-              ...joinParams,
+              // Only passed for the host/moderator.
+              ...(isModerator && zak ? { zak } : {}),
               success: () => {
                 setStatus('connected');
                 isConnectedRef.current = true;
@@ -381,8 +375,12 @@ function ZoomPlayer({
                 // onWaitingRoomParticipantJoin fires when Zoom's native waiting
                 // room is active and a participant is held there.
                 if (isModerator) {
+                  // Cast event name to `any` because the Zoom SDK's type
+                  // definitions only declare overloads for a narrow set of QoS
+                  // events; waiting-room and join events are valid at runtime
+                  // but not yet reflected in the shipped .d.ts types.
                   ZoomMtg.inMeetingServiceListener(
-                    'onWaitingRoomParticipantJoin',
+                    'onWaitingRoomParticipantJoin' as any,
                     (data: any) => {
                       console.info(
                         `[ZoomPlayer] 🚪 Participant entered Zoom waiting room:`,
@@ -393,7 +391,7 @@ function ZoomPlayer({
                   );
 
                   ZoomMtg.inMeetingServiceListener(
-                    'onUserJoin',
+                    'onUserJoin' as any,
                     (data: any) => {
                       console.info(
                         `[ZoomPlayer] ✅ Participant joined the meeting:`,
@@ -414,11 +412,13 @@ function ZoomPlayer({
                 // Fires within ~200 ms. Does NOT run for the host/moderator.
                 if (!isModerator) {
                   ZoomMtg.inMeetingServiceListener(
-                    'onAudioStateChange',
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    'onAudioStateChange' as any,
                     (data: any) => {
                       if (data?.muted === false) {
                         // Student unmuted — re-mute immediately
-                        ZoomMtg.muteAudio({
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        (ZoomMtg as any).muteAudio({
                           mute: true,
                           success: () => {},
                           error: (e: any) =>
